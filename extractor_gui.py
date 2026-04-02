@@ -184,13 +184,18 @@ class ExtractorApp:
                 if lbl_file.name == 'classes.txt': continue
                 
                 is_mod = False
+                lines_to_keep = []
                 for enc in ['utf-8', 'cp950', 'ansi']:
                     try:
+                        is_mod = False
+                        lines_to_keep = []
                         with open(lbl_file, 'r', encoding=enc) as f:
                             for line in f:
-                                if line.split() and line.split()[0] == target_id:
+                                parts = line.strip().split()
+                                if parts and parts[0] == target_id:
                                     is_mod = True
-                                    break
+                                else:
+                                    lines_to_keep.append(line)
                         break
                     except Exception: continue
                 
@@ -200,7 +205,8 @@ class ExtractorApp:
                         img_path = img_dir / (lbl_file.stem + ext)
                         if img_path.exists():
                             shutil.copy2(str(img_path), str(out_img_dir / (lbl_file.stem + ext)))
-                            shutil.copy2(str(lbl_file), str(out_lbl_dir / lbl_file.name))
+                            with open(out_lbl_dir / lbl_file.name, 'w', encoding='utf-8') as out_f:
+                                out_f.writelines(lines_to_keep)
                             self.log(f"✅ 提取成功: {lbl_file.stem}")
                             count += 1
                             found = True
