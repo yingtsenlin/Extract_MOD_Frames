@@ -18,7 +18,7 @@ class ExtractorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("YOLO MOD 標籤提取工具 v2.0")
-        self.root.geometry("650x550")
+        self.root.geometry("650x600")
         self.root.resizable(False, False)
 
         # 設定顏色與字體
@@ -58,6 +58,14 @@ class ExtractorApp:
         btn_browse = tk.Button(config_frame, text="瀏覽...", command=self.browse_folder, font=self.font_main)
         btn_browse.grid(row=1, column=1, sticky="e")
 
+        # 3. 輸出存放路徑輸入
+        tk.Label(config_frame, text="輸出存放路徑 (選填):", font=self.font_main, bg=self.bg_color).grid(row=2, column=0, sticky="w", pady=5)
+        self.out_path_entry = tk.Entry(config_frame, font=self.font_main, width=33)
+        self.out_path_entry.grid(row=2, column=1, padx=10, sticky="w")
+        
+        btn_out_browse = tk.Button(config_frame, text="瀏覽...", command=self.browse_out_folder, font=self.font_main)
+        btn_out_browse.grid(row=2, column=1, sticky="e")
+
         # 日誌顯示區
         tk.Label(self.root, text="執行日誌:", font=self.font_main, bg=self.bg_color).pack(anchor="w", padx=20)
         self.log_area = scrolledtext.ScrolledText(self.root, height=12, font=("Consolas", 9))
@@ -81,6 +89,12 @@ class ExtractorApp:
         if selected:
             self.path_entry.delete(0, tk.END)
             self.path_entry.insert(0, selected)
+
+    def browse_out_folder(self):
+        selected = filedialog.askdirectory()
+        if selected:
+            self.out_path_entry.delete(0, tk.END)
+            self.out_path_entry.insert(0, selected)
 
     def log(self, message):
         self.log_area.config(state="normal")
@@ -123,6 +137,7 @@ class ExtractorApp:
 
     def start_process(self):
         target_path = self.path_entry.get().strip().strip('"').strip("'")
+        out_target_path = self.out_path_entry.get().strip().strip('"').strip("'")
         gas_key = self.gas_var.get()
         
         if not target_path:
@@ -132,11 +147,11 @@ class ExtractorApp:
         gas_code = self.gas_mapping.get(gas_key, "UNKNOWN")
         
         self.btn_start.config(state="disabled")
-        thread = threading.Thread(target=self.extract_logic, args=(target_path, gas_code))
+        thread = threading.Thread(target=self.extract_logic, args=(target_path, out_target_path, gas_code))
         thread.daemon = True
         thread.start()
 
-    def extract_logic(self, raw_path, gas_code):
+    def extract_logic(self, raw_path, out_raw_path, gas_code):
         try:
             base_path = Path(raw_path)
             orig_name = base_path.name
@@ -155,6 +170,16 @@ class ExtractorApp:
             else:
                 base_dir = base_path.resolve()
 
+            # 2.5 處理輸出存放路徑
+            if out_raw_path:
+                out_base_path = Path(out_raw_path)
+                if os.name == 'nt' and not str(out_base_path).startswith('\\\\?\\'):
+                    out_base_dir = Path('\\\\?\\' + str(out_base_path.resolve()))
+                else:
+                    out_base_dir = out_base_path.resolve()
+            else:
+                out_base_dir = base_dir
+
             # 3. 檢查子資料夾 (依據您的程式碼使用 images/labels)
             img_dir = base_dir / 'images'
             lbl_dir = base_dir / 'labels'
@@ -165,7 +190,7 @@ class ExtractorApp:
                 return
 
             # 4. 設定輸出位置
-            output_base = base_dir / output_name
+            output_base = out_base_dir / output_name
             out_img_dir = output_base / 'images'
             out_lbl_dir = output_base / 'labels'
 
