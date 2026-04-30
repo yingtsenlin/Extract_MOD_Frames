@@ -1,0 +1,6 @@
+detection_params:
+  confidence: 0.35
+  frame_interval: '30'
+  model: ppe_260428_APCEnhance.pt
+tools:
+  darklabel_path: D:\Users\yingtsenlin\tools\DarkLabel\DarkLabel.exe

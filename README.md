@@ -1,60 +1,90 @@
-# YOLO MOD 提取工具 (YOLO MOD Extractor)
+﻿# Extract MOD Frames (之後會改名)
 
-這是一個專為 YOLO 影像辨識工作流設計的輔助工具。當你在進行初步標註（如使用 DarkLabel）時，可以將需要後續加強或修改的影格標記為特定類別（預設為 mod，編號 4）。此工具能自動將這些影格及其對應的標籤檔從海量資料中挑選出來，方便進行二次精細修改。
+這個專案是用來串接「影片偵測自動化 + 後處理精修」的工具，核心目標是：
+- 批次匯入影片任務
+- 透過 Playwright 自動操作網頁偵測
+- 下載 YOLO 資料集到 `output/`
+- 提取含 `mod(4)` 的影像，並在輸出時自動移除 `mod` 標籤
+- 一鍵啟動 DarkLabel 進行精修
 
-## 🚀 功能亮點
+## 功能
 
-* 直覺式 GUI 介面：提供圖形化視窗，支援路徑瀏覽與手動貼上。
+- 任務管理（SQLite）
+  - 任務新增、刪除、重試（Pending）
+  ![alt text](任務狀態總覽.png)
+  - 匯入任務
+    ![alt text](匯入資料夾.png)
 
-* 全在地化執行：無需聯網，確保資料安全性，不產生多餘的快取紀錄。
 
-## 🛠️ 安裝要求
+- 偵測自動化（Playwright）
+  - 自動載入模型、信心值、上傳影片、下載結果
+  ![alt text](偵測參數設定.png)
+- 後處理
+  - `✂️ 提取 Mod (4) 影像並清除標籤`
+  - 僅提取「曾出現 mod(4)」的幀
+  - 在提取出的標註檔中，自動移除所有 `4 ` 開頭標註列
+  ![alt text](MOD標籤提取與精修.png)
+- DarkLabel 整合
+  - 啟動前自動更新 `darklabel.yml` 的預設路徑
+  - 自動設定：`media_path_root`、`gt_path_root`、`auto_gt_load=1`、`gt_file_ext="txt"`
+  - 按下 `在此資料夾啟動 Darklabel`後， Darklabel會自動開啟，*open images 後會自動進入目標路徑*
+  - 目標路徑以英文與數字為主
 
-如果你是直接執行 Python 腳本，請確保環境符合以下條件：
+## 專案結構
+
+```text
+source/
+├── app.py
+├── config.yaml
+├── requirements.txt
+├── database/
+│   └── tracker.db
+├── modules/
+│   ├── db_manager.py
+│   ├── file_parser.py
+│   ├── playwright_bot.py
+│   └── post_process.py
+└── output/
 ```
-Python 3.6+
-```
-內建 ```tkinter``` 庫（通常 Python 安裝時會內建）
 
-## 📖 使用說明
+## 安裝與啟動
 
-1. **選擇路徑**：點擊「瀏覽...」或直接貼上包含 image 與 label 子資料夾的主路徑。
+1. 安裝套件
 
-2. **選擇類型**：下拉選單選擇「氯乙烯CGTD01」或「丁二烯CGTD02」
-  
-3. **開始掃描**：點擊「開始提取 (Start)」，程式會掃描 label/*.txt。
-
-4. **檢查結果**：程式會自動在目標目錄下建立 CGTD01_日期_時間_part 或 CGTD01_日期_時間_part 資料夾，內含篩選後的影像與標籤。
-
-5. **二次標註**：直接使用 DarkLabel 打開 mod_refinement 資料夾進行加強修改。
-
-## 📦 封裝為執行檔 (.exe)
-
-為了在沒有安裝 Python 的環境下使用，你可以使用 PyInstaller 將其封裝。在專案目錄下執行以下指令：
 ```bash
-pyinstaller --onefile --noconsole --clean --name "YOLO_MOD_Extractor" extractor_gui.py
+pip install -r source/requirements.txt
 ```
+
+2. 啟動介面（在 `source/` 目錄）
+
 ```bash
---onefile: 打包成單一執行檔。
-
---noconsole: 執行時隱藏背景的黑色指令視窗。
-
---name: 指定生成的軟體名稱。
+streamlit run app.py
 ```
 
-## 📁 資料夾結構範例
+## 設定檔
 
-執行前，請確保你的資料夾結構如下：
-```
-你的專案資料夾/
-├── image/          # 存放原始影像
-└── label/          # 存放 .txt 標籤檔
-```
+*使用前請先更新設定檔*
 
-執行後會生成：
-```
-你的專案資料夾/
-└── mod_refinement/
-    ├── image/      # 被提取的影像
-    └── label/      # 被提取的標籤檔與 classes.txt
-```
+`source/config.yaml`：
+- `detection_params.confidence`：偵測信心值
+- `detection_params.frame_interval`：抽幀間隔
+- `detection_params.model`：模型名稱
+- `tools.darklabel_path`：DarkLabel 執行檔完整路徑（例如 `D:\Users\...\DarkLabel.exe`）
+
+## 使用流程
+
+1. 在「匯入資料與設定」輸入母資料夾並建立任務
+2. 到「任務總覽與自動化」啟動機器人
+3. 完成後到「後處理與 Darklabel」
+4. 按 `✂️ 提取 Mod (4) 影像並清除標籤`
+   - 輸出資料夾：`<原資料夾>_mod_extracted`
+   - 內容包含：
+     - `images/`：有出現 mod 的影像
+     - `labels/`：已移除 mod(4) 標籤列的標註
+5. 視需要按 `🖌️ 在此資料夾啟動 Darklabel` 進行人工精修
+
+## 注意事項
+
+- `tracker.db` 位於 `source/database/tracker.db`
+- 若 DarkLabel 無法啟動，先確認 `config.yaml` 的 `darklabel_path` 是否正確
+- 啟動自動化前，請確認目標網站可連線且帳號權限正常
