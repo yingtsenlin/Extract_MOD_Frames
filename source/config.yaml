@@ -1,6 +1,15 @@
 detection_params:
+  class_filter:
+  - '4'
   confidence: 0.35
-  frame_interval: '30'
+  frame_interval: '5'
   model: ppe_260428_APCEnhance.pt
+pipeline:
+  segment_seconds: 30
+  target_fps: 10
 tools:
   darklabel_path: D:\Users\yingtsenlin\tools\DarkLabel\DarkLabel.exe
+  ffmpeg_path: D:\Users\yingtsenlin\tools\ffmpeg\bin\ffmpeg.exe
+  headless: true
+  mod_output_dir: D:\Users\yingtsenlin\Desktop\mod_output
+  output_dir: D:\Users\yingtsenlin\Desktop\output

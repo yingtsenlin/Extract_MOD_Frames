@@ -8,32 +8,68 @@ from pathlib import Path
 import yaml
 
 
-def extract_mod_frames(completed_folder_path):
+def load_config():
+    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+    with open(config_path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def _default_mod_output_dir() -> str:
+    return os.path.join(str(Path.home()), "Desktop", "mod_output")
+
+
+def _get_mod_output_dir_from_config() -> str:
+    try:
+        config = load_config()
+        value = config.get("tools", {}).get("mod_output_dir")
+        if value and str(value).strip():
+            return os.path.normpath(str(value).strip())
+    except Exception:
+        pass
+    return _default_mod_output_dir()
+
+
+def extract_mod_frames(completed_folder_path, output_root=None, log_callback=None):
     """
-    Extract frames that contain class `4` into `<folder>_mod_extracted`.
-    In extracted labels, class `4` rows are removed automatically.
+    Extract frames containing class '4' into a configurable output folder.
+    Output folder name format: <source_folder_name>_mod_extracted
     """
-    labels_dir = os.path.join(completed_folder_path, "labels")
-    images_dir = os.path.join(completed_folder_path, "images")
 
-    extracted_dir = completed_folder_path + "_mod_extracted"
-    ext_labels = os.path.join(extracted_dir, "labels")
-    ext_images = os.path.join(extracted_dir, "images")
+    def log(msg: str):
+        if log_callback:
+            log_callback(msg)
+        else:
+            print(msg)
 
-    os.makedirs(ext_labels, exist_ok=True)
-    os.makedirs(ext_images, exist_ok=True)
+    source_dir = Path(completed_folder_path).resolve()
+    if output_root:
+        root_dir = Path(output_root).expanduser().resolve()
+    else:
+        root_dir = Path(_get_mod_output_dir_from_config()).expanduser().resolve()
+    root_dir.mkdir(parents=True, exist_ok=True)
 
-    if not os.path.exists(labels_dir):
-        print(f"找不到 labels 資料夾: {labels_dir}")
+    labels_dir = source_dir / "labels"
+    images_dir = source_dir / "images"
+
+    extracted_dir = root_dir / f"{source_dir.name}_mod_extracted"
+    ext_labels = extracted_dir / "labels"
+    ext_images = extracted_dir / "images"
+
+    ext_labels.mkdir(parents=True, exist_ok=True)
+    ext_images.mkdir(parents=True, exist_ok=True)
+
+    if not labels_dir.exists():
+        log(f"找不到 labels 資料夾: {labels_dir}")
         return None
 
     extracted_count = 0
     removed_mod_rows = 0
+
     for txt_file in os.listdir(labels_dir):
         if not txt_file.endswith(".txt"):
             continue
 
-        txt_path = os.path.join(labels_dir, txt_file)
+        txt_path = labels_dir / txt_file
         has_mod = False
         kept_lines = []
 
@@ -46,31 +82,27 @@ def extract_mod_frames(completed_folder_path):
                 kept_lines.append(line)
 
         if has_mod:
-            with open(os.path.join(ext_labels, txt_file), "w", encoding="utf-8") as f:
+            with open(ext_labels / txt_file, "w", encoding="utf-8") as f:
                 f.writelines(kept_lines)
 
             base_name = os.path.splitext(txt_file)[0]
             for ext in [".jpg", ".png", ".jpeg"]:
-                img_path = os.path.join(images_dir, base_name + ext)
-                if os.path.exists(img_path):
-                    shutil.copy(img_path, os.path.join(ext_images, base_name + ext))
+                img_path = images_dir / f"{base_name}{ext}"
+                if img_path.exists():
+                    shutil.copy(img_path, ext_images / img_path.name)
                     break
 
             extracted_count += 1
 
-    yaml_path = os.path.join(completed_folder_path, "data.yaml")
-    if os.path.exists(yaml_path):
-        shutil.copy(yaml_path, os.path.join(extracted_dir, "data.yaml"))
+    yaml_path = source_dir / "data.yaml"
+    if yaml_path.exists():
+        shutil.copy(yaml_path, extracted_dir / "data.yaml")
 
-    print(f"提取完成，共 {extracted_count} 筆含 mod(4) 標註；已移除 {removed_mod_rows} 列 mod(4) 標籤")
-    return extracted_dir
+    log(f"提取完成，共 {extracted_count} 筆含 mod(4) 標註；已移除 {removed_mod_rows} 列 mod(4) 標籤")
+    return str(extracted_dir)
 
 
 def remove_mod_labels(completed_folder_path):
-    """
-    Create `<folder>_mod_removed` and remove class `4` rows from all label txt files.
-    Keep original folder untouched.
-    """
     source_dir = Path(completed_folder_path).resolve()
     output_dir = Path(str(source_dir) + "_mod_removed")
 
@@ -109,19 +141,11 @@ def remove_mod_labels(completed_folder_path):
     }
 
 
-def load_config():
-    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def _escape_for_darklabel(path_text: str) -> str:
-    """DarkLabel yml uses double quoted strings, so backslashes must be escaped."""
     return path_text.replace("\\", "\\\\")
 
 
 def _resolve_darklabel_dataset_dirs(base_folder: str):
-    """Resolve best images/labels dirs for DarkLabel (supports nested train/valid folders)."""
     base = Path(base_folder).resolve()
 
     direct_images = base / "images"
@@ -142,7 +166,6 @@ def _resolve_darklabel_dataset_dirs(base_folder: str):
 
 
 def _upsert_darklabel_key(content: str, key: str, value_literal: str) -> str:
-    """Update an existing top-level key; append it if missing."""
     pattern = rf"(?m)^(\s*{re.escape(key)}\s*:\s*).*$"
     if re.search(pattern, content):
         return re.sub(pattern, lambda m: f"{m.group(1)}{value_literal}", content, count=1)
@@ -150,7 +173,6 @@ def _upsert_darklabel_key(content: str, key: str, value_literal: str) -> str:
 
 
 def launch_darklabel(folder_path, legacy_path=None):
-    """Launch DarkLabel and pre-fill media/gt roots in darklabel.yml."""
     try:
         config = load_config()
         darklabel_exe_path = config["tools"]["darklabel_path"]
@@ -177,7 +199,6 @@ def launch_darklabel(folder_path, legacy_path=None):
             content = _upsert_darklabel_key(content, "auto_gt_load", "1")
             content = _upsert_darklabel_key(content, "gt_file_ext", '"txt"')
 
-            # Atomic write: avoid partial writes that can break DarkLabel startup.
             with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8", dir=darklabel_dir) as tf:
                 tf.write(content)
                 temp_yml_path = tf.name
@@ -189,7 +210,6 @@ def launch_darklabel(folder_path, legacy_path=None):
             msg_parts.append("找不到 darklabel.yml，已直接啟動 DarkLabel（未寫入預設路徑）。")
 
         try:
-            # Always launch with DarkLabel folder as CWD so it can find darklabel.yml.
             subprocess.Popen([darklabel_exe_path], cwd=darklabel_dir)
             msg_parts.append("DarkLabel 已啟動。")
             return "\n".join(msg_parts)
