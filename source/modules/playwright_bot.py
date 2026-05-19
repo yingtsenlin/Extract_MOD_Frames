@@ -162,8 +162,31 @@ def apply_detection_options(page, config):
 def run_automation():
     lock_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "automation.lock")
     if os.path.exists(lock_path):
-        write_log("偵測到自動化流程已在執行中，這次請求略過")
-        return
+        stale_lock = False
+        lock_pid = None
+        try:
+            with open(lock_path, "r", encoding="utf-8") as f:
+                raw = f.read().strip()
+            if raw.isdigit():
+                lock_pid = int(raw)
+                try:
+                    os.kill(lock_pid, 0)
+                except OSError:
+                    stale_lock = True
+            else:
+                stale_lock = True
+        except Exception:
+            stale_lock = True
+
+        if stale_lock:
+            try:
+                os.remove(lock_path)
+                write_log(f"[Lock] 偵測到過期鎖定，已自動清除: {lock_path}, pid={lock_pid}")
+            except Exception as e:
+                write_log(f"[Lock] 發現過期鎖定但清除失敗，改為直接覆寫: {lock_path}, error={e}")
+        else:
+            write_log("偵測到自動化流程已在執行中，這次請求略過")
+            return
 
     with open(lock_path, "w", encoding="utf-8") as f:
         f.write(str(os.getpid()))
@@ -283,6 +306,9 @@ def run_automation():
                     results_dir = os.path.join(task_root, "results")
                     if os.path.isdir(results_dir) and not os.listdir(results_dir):
                         shutil.rmtree(results_dir, ignore_errors=True)
+                    if os.path.isdir(task_root) and not os.listdir(task_root):
+                        os.rmdir(task_root)
+                        write_log(f"[Cleanup] 已移除空白任務資料夾: {task_root}")
 
                     db_manager.update_task_status(task_id, "Completed")
                     write_log(f"任務完成，合併結果已輸出到: {final_dir}")

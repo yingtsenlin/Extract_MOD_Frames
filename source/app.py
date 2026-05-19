@@ -2,12 +2,13 @@
 import sqlite3
 import threading
 import time
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 import yaml
 
-from modules import db_manager, file_parser, playwright_bot, post_process
+from modules import agent_skill, db_manager, file_parser, playwright_bot, post_process
 
 
 db_manager.init_db()
@@ -54,11 +55,21 @@ def load_system_log_tail(lines=20):
         data = f.readlines()
     return "".join(data[-lines:])
 
+def write_system_log(message):
+    log_path = os.path.join(os.path.dirname(__file__), "system.log")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {message}\n")
+
 
 st.set_page_config(page_title="影片偵測自動化中控台", layout="wide")
 
 st.sidebar.title("系統控制面板")
-page = st.sidebar.radio("功能導覽", ["1. 任務總覽與自動化", "2. 匯入資料與設定", "3. 後處理與 Darklabel"])
+page = st.sidebar.radio(
+    "功能導覽",
+    ["1. 任務總覽與自動化", "2. 匯入資料與設定", "3. 後處理與 Darklabel", "4. Agent Skill 上傳與改名"],
+)
 
 
 if page == "1. 任務總覽與自動化":
@@ -133,7 +144,7 @@ if page == "1. 任務總覽與自動化":
 
     with col_unlock:
         if st.button("強制解除系統鎖定"):
-            lock_path = "automation.lock"
+            lock_path = os.path.join(os.path.dirname(__file__), "automation.lock")
             if os.path.exists(lock_path):
                 os.remove(lock_path)
                 st.success("已解除系統鎖定")
@@ -229,9 +240,28 @@ elif page == "3. 後處理與 Darklabel":
     config = load_config()
     output_dir = get_output_dir(config)
     os.makedirs(output_dir, exist_ok=True)
-    completed_folders = sorted(
-        [f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))]
+    completed_folders = [f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))]
+
+    sort_mode = st.selectbox(
+        "資料夾排序方式",
+        ["建立時間（新到舊）", "建立時間（舊到新）", "名稱（A-Z）", "名稱（Z-A）"],
+        index=0,
     )
+    if sort_mode == "建立時間（新到舊）":
+        completed_folders = sorted(
+            completed_folders,
+            key=lambda f: os.path.getctime(os.path.join(output_dir, f)),
+            reverse=True,
+        )
+    elif sort_mode == "建立時間（舊到新）":
+        completed_folders = sorted(
+            completed_folders,
+            key=lambda f: os.path.getctime(os.path.join(output_dir, f)),
+        )
+    elif sort_mode == "名稱（Z-A）":
+        completed_folders = sorted(completed_folders, reverse=True)
+    else:
+        completed_folders = sorted(completed_folders)
 
     if "post_select_all" not in st.session_state:
         st.session_state.post_select_all = False
@@ -289,3 +319,144 @@ elif page == "3. 後處理與 Darklabel":
     st.subheader("終端日誌")
     st.caption("顯示 system.log 最近 20 條")
     st.text_area("Post-process Log", load_system_log_tail(20), height=300, disabled=True)
+
+
+
+
+elif page == "4. Agent Skill 上傳與改名":
+    st.header("Agent Skill 上傳與改名")
+    st.caption("貼上目標路徑後，會抓該路徑下所有資料夾，各自壓縮成 zip 再上傳。")
+
+    config = load_config()
+    config.setdefault("tools", {})
+    root_paths_input = st.text_area(
+        "目標資料夾路徑（每行一個）",
+        placeholder="例如:\nD:\\Data\\BatchA\nD:\\Data\\BatchB",
+        key="agent_root_paths_input",
+        height=120,
+    )
+    root_paths = [line.strip() for line in root_paths_input.splitlines() if line.strip()]
+    target_subfolders = agent_skill.collect_subfolders_from_roots(root_paths)
+    st.session_state["agent_target_subfolders"] = target_subfolders
+
+    st.subheader("待壓縮資料夾")
+    if target_subfolders:
+        st.dataframe(pd.DataFrame({"資料夾路徑": target_subfolders}), width="stretch", hide_index=True)
+    else:
+        st.info("尚未找到可壓縮子資料夾（請確認路徑存在，且目錄下有資料夾）。")
+
+    if "agent_rename_rows" not in st.session_state:
+        st.session_state["agent_rename_rows"] = []
+
+    if st.button("改名", use_container_width=True):
+        if not target_subfolders:
+            st.warning("請先提供有效路徑")
+        else:
+            write_system_log(f"[AgentSkill][Rename] start, folders={len(target_subfolders)}")
+            rename_rows = []
+            skill_applied = 0
+            for p in target_subfolders:
+                fallback_name = os.path.basename(p)
+                suggested_name = agent_skill.suggest_folder_rename(
+                    folder_path=p,
+                    config=config,
+                    log_callback=write_system_log,
+                )
+                if suggested_name != fallback_name:
+                    skill_applied += 1
+                rename_rows.append({"原資料夾路徑": p, "新名稱": suggested_name})
+            st.session_state["agent_rename_rows"] = rename_rows
+            write_system_log(f"[AgentSkill][Rename] done, folders={len(target_subfolders)}, skill_applied={skill_applied}")
+            st.success(f"已產生 {len(target_subfolders)} 筆改名資料")
+            st.caption(f"SKILL 建議名稱套用 {skill_applied} 筆")
+
+    rename_rows = st.session_state.get("agent_rename_rows", [])
+    st.subheader("改名結果(表格可修改)")
+    if rename_rows:
+        rename_df = pd.DataFrame(rename_rows)
+        edited_df = st.data_editor(
+            rename_df,
+            width="stretch",
+            hide_index=True,
+            key="agent_rename_editor",
+            column_config={
+                "原資料夾路徑": st.column_config.TextColumn("原資料夾路徑"),
+                "新名稱": st.column_config.TextColumn("新名稱"),
+            },
+            disabled=["原資料夾路徑"],
+        )
+        st.session_state["agent_rename_rows"] = edited_df.to_dict(orient="records")
+    else:
+        st.info("尚未產生改名資料，請先按「改名」。")
+
+    if st.button("儲存", use_container_width=True):
+        rows = st.session_state.get("agent_rename_rows", [])
+        if not rows:
+            st.warning("沒有可儲存的改名資料")
+        else:
+            rename_map = {}
+            used = set()
+            valid = True
+            for row in rows:
+                folder_path = str(row.get("原資料夾路徑", "")).strip()
+                new_name = str(row.get("新名稱", "")).strip()
+                if not folder_path or not new_name:
+                    valid = False
+                    break
+                key = new_name.lower()
+                if key in used:
+                    valid = False
+                    break
+                used.add(key)
+                rename_map[folder_path] = new_name
+            if not valid:
+                st.error("儲存失敗：新名稱不可空白且不可重複")
+            else:
+                st.session_state["agent_folder_rename_map"] = rename_map
+                st.success(f"已儲存 {len(rename_map)} 筆改名結果")
+
+    @st.dialog("上傳驗證")
+    def upload_auth_dialog():
+        st.write("請輸入帳號密碼後開始上傳")
+        username = st.text_input("帳號", key="agent_upload_username")
+        password = st.text_input("密碼", type="password", key="agent_upload_password")
+        if st.button("確認上傳", type="primary", use_container_width=True):
+            folders = st.session_state.get("agent_target_subfolders", [])
+            if not folders:
+                st.error("目前沒有可壓縮的子資料夾")
+                return
+
+            session_dir = agent_skill.create_session_workdir(os.path.join(os.path.dirname(__file__), "output"))
+            zip_paths = agent_skill.zip_each_folder(
+                folder_paths=folders,
+                output_dir=os.path.join(session_dir, "zips"),
+                log_callback=write_system_log,
+                rename_map=st.session_state.get("agent_folder_rename_map", {}),
+            )
+            result = agent_skill.run_agent_skill_upload(
+                file_paths=zip_paths,
+                username=username,
+                password=password,
+                config=config,
+                log_callback=write_system_log,
+            )
+            st.session_state["agent_last_upload_result"] = result
+            st.success(
+                f"上傳完成，共壓縮 {len(zip_paths)} 個資料夾，成功 {result.get('uploaded_count', result.get('uploaded_batches', 0))} 筆"
+            )
+            st.rerun()
+
+    if st.button("上傳", type="primary", use_container_width=True):
+        if not target_subfolders:
+            st.warning("請先提供有效路徑")
+        else:
+            upload_auth_dialog()
+
+    last_result = st.session_state.get("agent_last_upload_result")
+    if last_result:
+        st.divider()
+        st.subheader("最近一次上傳結果")
+        st.json(last_result)
+
+
+

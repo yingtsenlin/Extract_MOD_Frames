@@ -81,6 +81,7 @@ streamlit run app.py
 - `tools.mod_output_dir`（Mod 抽取輸出）
 - `tools.headless`
 - `tools.darklabel_path`（目前 UI 已暫時隱藏啟動按鈕，但設定仍保留）
+- `tools.agent_skill_module`（可選，指定外部 Python 模組；需提供 `process_upload(...)` 函式）
 - `pipeline.target_fps`
 - `pipeline.segment_seconds`
 

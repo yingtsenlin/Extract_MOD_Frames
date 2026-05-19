@@ -58,6 +58,7 @@ def delete_tasks(task_ids):
         # 產生對應數量的問號，例如 task_ids=[1, 2, 3] 會變成 (?, ?, ?)
         placeholders = ','.join(['?'] * len(task_ids))
         cursor.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", tuple(task_ids))
+        _reindex_job_ids(cursor)
         conn.commit()
 
 def reset_tasks_to_pending(task_ids):
@@ -69,3 +70,23 @@ def reset_tasks_to_pending(task_ids):
         placeholders = ','.join(['?'] * len(task_ids))
         cursor.execute(f"UPDATE jobs SET status = 'Pending' WHERE id IN ({placeholders})", tuple(task_ids))
         conn.commit()
+
+
+def _reindex_job_ids(cursor):
+    """將 jobs.id 重排為從 1 開始的連續整數，並重置 AUTOINCREMENT 序列。"""
+    cursor.execute("SELECT id FROM jobs ORDER BY id")
+    current_ids = [row[0] for row in cursor.fetchall()]
+    if not current_ids:
+        cursor.execute("DELETE FROM sqlite_sequence WHERE name = 'jobs'")
+        return
+
+    expected_ids = list(range(1, len(current_ids) + 1))
+    if current_ids != expected_ids:
+        offset = max(current_ids) + len(current_ids) + 1
+        cursor.execute("UPDATE jobs SET id = id + ?", (offset,))
+        for new_id, old_id in enumerate(current_ids, start=1):
+            cursor.execute("UPDATE jobs SET id = ? WHERE id = ?", (new_id, old_id + offset))
+
+    cursor.execute("UPDATE sqlite_sequence SET seq = ? WHERE name = 'jobs'", (len(current_ids),))
+    if cursor.rowcount == 0:
+        cursor.execute("INSERT INTO sqlite_sequence(name, seq) VALUES('jobs', ?)", (len(current_ids),))

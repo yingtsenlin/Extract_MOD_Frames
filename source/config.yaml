@@ -8,8 +8,10 @@ pipeline:
   segment_seconds: 30
   target_fps: 10
 tools:
+  agent_skill_base_url: http://10.10.91.25:3000/
+  agent_skill_module: D:\Users\yingtsenlin\Desktop\skill_work\dataset-migration-manager
   darklabel_path: D:\Users\yingtsenlin\tools\DarkLabel\DarkLabel.exe
   ffmpeg_path: D:\Users\yingtsenlin\tools\ffmpeg\bin\ffmpeg.exe
-  headless: true
-  mod_output_dir: D:\Users\yingtsenlin\Desktop\mod_output
-  output_dir: D:\Users\yingtsenlin\Desktop\output
+  headless: false
+  mod_output_dir: D:\Users\yingtsenlin\Desktop\mod_output\0518
+  output_dir: D:\Users\yingtsenlin\Desktop\output\0518
